@@ -1,5 +1,4 @@
-# Relatório de Sensores — LQA PUC-Rio
-
+# Relatório de Sensores — Blue Sky
 Dashboard em Streamlit para comparar o sensor de referência (Prefeitura) com os
 dois sensores Airgradient (3min e 5min), em versões bruta e corrigida.
 
