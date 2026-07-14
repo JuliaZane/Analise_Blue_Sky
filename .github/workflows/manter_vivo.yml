@@ -1,0 +1,21 @@
+name: Manter App do Streamlit Vivo
+
+on:
+  schedule:
+    # Executa a cada 10 horas
+    - cron: '0 */10 * * *'
+  workflow_dispatch: # Permite que você ative manualmente pelo GitHub se quiser testar
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout do código
+      uses: actions/checkout@v4
+
+    - name: Fazer commit vazio
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git commit --allow-empty -m "Trigger automatico para manter o Streamlit acordado"
+        git push
