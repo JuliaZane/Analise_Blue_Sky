@@ -64,22 +64,58 @@ def load_csv(file):
 @st.cache_data(show_spinner=False)
 def build_merged(df_pref, df_3min, df_5min):
     """Une, hora a hora, referência + sensor 3min + sensor 5min num único dataframe.
-    Temperatura/umidade usam apenas o valor bruto (o 'corrigido' do fabricante repete o bruto)."""
+    Temperatura/umidade usam apenas o valor bruto (o 'corrigido' do fabricante repete o bruto).
+    Traz também, quando disponíveis:
+      - as colunas de outlier (`is_outlier_*` / `outlier_*`), renomeadas para <coluna>_outlier;
+      - as colunas <coluna>_sem_limpeza, com a média horária SEM nenhuma remoção de outlier por IQR
+        (geradas pelos scripts Sensor_Referencia.py / Sensor_1_(3min).py / Sensor_2_(5min).py já
+        atualizados). Se o CSV enviado ainda não tiver essas colunas, elas simplesmente não aparecem
+        e o restante do app segue funcionando normalmente com o que estiver disponível."""
     parts = []
     if df_pref is not None:
-        p = df_pref[["data_hora_cheia", "ref_pm25", "ref_pm10", "temperatura", "umidade_relativa"]].rename(
-            columns={"temperatura": "ref_temp", "umidade_relativa": "ref_umid"})
+        cols = {"ref_pm25": "ref_pm25", "ref_pm10": "ref_pm10",
+                "temperatura": "ref_temp", "umidade_relativa": "ref_umid"}
+        outliers = {"outlier_ref_pm25": "ref_pm25_outlier", "outlier_ref_pm10": "ref_pm10_outlier"}
+        # Nomes candidatos para as colunas "sem limpeza" da referência — o nome final em Prefeitura.csv
+        # pode seguir a convenção ref_* ou a convenção original do script (pm01_particulas_2.5um etc.).
+        sem_limpeza_candidatos = {
+            "ref_pm25_sem_limpeza": ["ref_pm25_sem_limpeza", "pm01_particulas_2.5um_sem_limpeza"],
+            "ref_pm10_sem_limpeza": ["ref_pm10_sem_limpeza", "pm02_particulas_10um_sem_limpeza"],
+            "ref_temp_sem_limpeza": ["ref_temp_sem_limpeza", "temperatura_sem_limpeza"],
+        }
+        avail = ["data_hora_cheia"] + [c for c in cols if c in df_pref.columns] + \
+                [c for c in outliers if c in df_pref.columns]
+        p = df_pref[avail].rename(columns={**cols, **outliers})
+        for destino, candidatos in sem_limpeza_candidatos.items():
+            for cand in candidatos:
+                if cand in df_pref.columns:
+                    p[destino] = df_pref[cand]
+                    break
         parts.append(p)
     if df_3min is not None:
         cols = {"pm02": "s1_pm25_raw", "pm02_corrected": "s1_pm25_corr", "pm10": "s1_pm10_raw",
                 "pm10_corrected": "s1_pm10_corr", "atmp": "s1_temp", "rhum": "s1_umid"}
-        avail = ["data_hora_cheia"] + [c for c in cols if c in df_3min.columns]
-        parts.append(df_3min[avail].rename(columns=cols))
+        outliers = {"is_outlier_pm02": "s1_pm25_raw_outlier", "is_outlier_pm02_corrected": "s1_pm25_corr_outlier",
+                    "is_outlier_pm10": "s1_pm10_raw_outlier", "is_outlier_pm10_corrected": "s1_pm10_corr_outlier",
+                    "is_outlier_atmp": "s1_temp_outlier", "is_outlier_rhum": "s1_umid_outlier"}
+        sem_limpeza = {"pm02_sem_limpeza": "s1_pm25_raw_sem_limpeza", "pm02_corrected_sem_limpeza": "s1_pm25_corr_sem_limpeza",
+                       "pm10_sem_limpeza": "s1_pm10_raw_sem_limpeza", "pm10_corrected_sem_limpeza": "s1_pm10_corr_sem_limpeza",
+                       "atmp_sem_limpeza": "s1_temp_sem_limpeza", "rhum_sem_limpeza": "s1_umid_sem_limpeza"}
+        avail = ["data_hora_cheia"] + [c for c in cols if c in df_3min.columns] + \
+                [c for c in outliers if c in df_3min.columns] + [c for c in sem_limpeza if c in df_3min.columns]
+        parts.append(df_3min[avail].rename(columns={**cols, **outliers, **sem_limpeza}))
     if df_5min is not None:
         cols = {"pm02": "s2_pm25_raw", "pm02_corrected": "s2_pm25_corr", "pm10": "s2_pm10_raw",
                 "atmp": "s2_temp", "rhum": "s2_umid"}
-        avail = ["data_hora_cheia"] + [c for c in cols if c in df_5min.columns]
-        parts.append(df_5min[avail].rename(columns=cols))
+        outliers = {"is_outlier_pm02": "s2_pm25_raw_outlier", "is_outlier_pm02_corrected": "s2_pm25_corr_outlier",
+                    "is_outlier_pm10": "s2_pm10_raw_outlier",
+                    "is_outlier_atmp": "s2_temp_outlier", "is_outlier_rhum": "s2_umid_outlier"}
+        sem_limpeza = {"pm02_sem_limpeza": "s2_pm25_raw_sem_limpeza", "pm02_corrected_sem_limpeza": "s2_pm25_corr_sem_limpeza",
+                       "pm10_sem_limpeza": "s2_pm10_raw_sem_limpeza",
+                       "atmp_sem_limpeza": "s2_temp_sem_limpeza", "rhum_sem_limpeza": "s2_umid_sem_limpeza"}
+        avail = ["data_hora_cheia"] + [c for c in cols if c in df_5min.columns] + \
+                [c for c in outliers if c in df_5min.columns] + [c for c in sem_limpeza if c in df_5min.columns]
+        parts.append(df_5min[avail].rename(columns={**cols, **outliers, **sem_limpeza}))
 
     if not parts:
         return None
@@ -89,16 +125,74 @@ def build_merged(df_pref, df_3min, df_5min):
     return merged.sort_values("data_hora_cheia").reset_index(drop=True)
 
 
-def get_comparison_columns(variavel, versao):
-    """Retorna (col_ref, col_s1, col_s2, unidade) para a combinação escolhida."""
+def limpeza_selector(key_prefix):
+    """Escolhe entre a versão já limpa (IQR aplicado pelo pipeline) e a versão sem limpeza (bruta,
+    com outliers inclusos) — só funciona de verdade para fontes cujo CSV já tenha as colunas
+    <coluna>_sem_limpeza (gerado pelos scripts de coleta atualizados). Se faltar em alguma fonte,
+    o app avisa e usa a versão limpa como alternativa só para aquela fonte."""
+    opcao = st.radio(
+        "🧽 Qual versão dos dados comparar?",
+        ["Com limpeza (IQR já aplicado)", "Sem limpeza (bruto, outliers inclusos)"],
+        horizontal=True, key=f"{key_prefix}_limpeza",
+        help="Com limpeza: usa a média horária como o pipeline calcula hoje, já sem os valores fora "
+             "da faixa do IQR. Sem limpeza: usa a média horária com TODAS as leituras, sem descartar "
+             "nada — só existe se você já rodou os scripts de coleta atualizados (com as colunas "
+             "_sem_limpeza) e reenviou os CSVs; caso contrário, a fonte que faltar usa a versão limpa "
+             "e um aviso aparece no gráfico.",
+    )
+    return "sem_limpeza" if opcao.startswith("Sem limpeza") else "limpo"
+
+
+def outlier_toggle(key_prefix):
+    """Controle explícito: incluir ou excluir HORAS que tiveram alguma leitura bruta descartada
+    no pipeline de coleta (scripts Sensor_Referencia.py / Sensor_1_(3min).py / Sensor_2_(5min).py).
+
+    IMPORTANTE: a limpeza por quartis (IQR) já acontece nesses scripts, ANTES deste relatório —
+    o valor bruto descartado não existe mais na coluna principal (só sobrevive em val_outlier_*
+    no CSV de origem, como auditoria). Este toggle NÃO restaura o valor bruto; ele só decide se a
+    hora inteira (já com a média limpa) entra ou não na análise, quando pelo menos uma leitura
+    daquela hora foi descartada na etapa de pré-processamento."""
+    return st.checkbox(
+        "🧹 Excluir também as horas com alguma leitura bruta descartada pelo pipeline",
+        value=False, key=f"{key_prefix}_excl_outlier",
+        help="Atenção: as médias horárias destes arquivos JÁ chegam limpas — seus scripts de coleta "
+             "já removeram (por quartis/IQR, antes de calcular a média de cada hora) os valores brutos "
+             "fora da faixa. As colunas is_outlier_*/outlier_* indicam só 'nesta hora, ao menos uma "
+             "leitura bruta foi descartada nesse processo' — o valor bruto original não está mais "
+             "disponível aqui para comparar. Marcar esta opção remove a hora inteira (mesmo já limpa) "
+             "sempre que isso aconteceu — é uma camada extra de rigor, não uma forma de 'ver os "
+             "outliers'. Veja o documento de metodologia para o detalhe completo.",
+    )
+
+
+def apply_outlier_mask(df, cols, excluir):
+    """Se excluir=True, transforma em NaN (só para esta análise) os valores das colunas em `cols`
+    que estiverem marcados como outlier na coluna <col>_outlier correspondente."""
+    if not excluir or df is None or df.empty:
+        return df
+    df = df.copy()
+    for c in cols:
+        oc = f"{c}_outlier"
+        if oc in df.columns and c in df.columns:
+            df.loc[df[oc] == 1, c] = np.nan
+    return df
+
+
+def get_comparison_columns(variavel, versao, limpeza="limpo"):
+    """Retorna (col_ref, col_s1, col_s2, unidade) para a combinação escolhida.
+    limpeza="sem_limpeza" busca a coluna <base>_sem_limpeza; se ela não existir no dataframe
+    (fonte ainda não atualizada), quem chamar esta função deve tratar a ausência normalmente
+    (o padrão do app já mostra um aviso quando uma coluna não está disponível)."""
+    suf_limpeza = "_sem_limpeza" if limpeza == "sem_limpeza" else ""
     if variavel in ("PM2.5", "PM10"):
         pol = "pm25" if variavel == "PM2.5" else "pm10"
         suf = "_raw" if versao == "Bruto" else "_corr"
-        return f"ref_{pol}", f"s1_{pol}{suf}", f"s2_{pol}{suf}", VAR_UNITS[variavel]
+        return f"ref_{pol}{suf_limpeza}", f"s1_{pol}{suf}{suf_limpeza}", f"s2_{pol}{suf}{suf_limpeza}", VAR_UNITS[variavel]
     elif variavel == "Temperatura":
-        return "ref_temp", "s1_temp", "s2_temp", VAR_UNITS[variavel]
+        return f"ref_temp{suf_limpeza}", f"s1_temp{suf_limpeza}", f"s2_temp{suf_limpeza}", VAR_UNITS[variavel]
     elif variavel == "Umidade":
-        return "ref_umid", "s1_umid", "s2_umid", VAR_UNITS[variavel]
+        return f"ref_umid{suf_limpeza}", f"s1_umid{suf_limpeza}", f"s2_umid{suf_limpeza}", VAR_UNITS[variavel]
+
 
 
 def linreg(x, y):
@@ -338,7 +432,8 @@ with tab_overview:
     if df_merged is not None:
         st.markdown("#### Séries temporais comparadas")
         variavel, versao = variable_selector("ov")
-        ref_col, s1_col, s2_col, unidade = get_comparison_columns(variavel, versao)
+        limpeza_ov = limpeza_selector("ov")
+        ref_col, s1_col, s2_col, unidade = get_comparison_columns(variavel, versao, limpeza_ov)
         d, sel_dates = period_selector(df_merged, "ov", help_text="filtra o gráfico abaixo")
 
         render_comparison_chart(d, ref_col, s1_col, s2_col, variavel, unidade, key_prefix="ov")
@@ -493,16 +588,19 @@ with tab_compare:
             "lado a lado com a referência, para facilitar a comparação."
         )
         variavel, versao = variable_selector("cmp")
-        ref_col, s1_col, s2_col, unidade = get_comparison_columns(variavel, versao)
+        limpeza_cmp = limpeza_selector("cmp")
+        ref_col, s1_col, s2_col, unidade = get_comparison_columns(variavel, versao, limpeza_cmp)
         d, sel_dates = period_selector(df_merged, "cmp", help_text="aplica-se a todos os gráficos abaixo")
 
         s1_ok = s1_col in d.columns and d[s1_col].notna().any()
         s2_ok = s2_col in d.columns and d[s2_col].notna().any()
+        dica_limpeza = (" (você selecionou 'Sem limpeza' — confirme se já rodou os scripts de coleta "
+                        "atualizados e reenviou os CSVs com as colunas `_sem_limpeza`)") if limpeza_cmp == "sem_limpeza" else ""
         if not s1_ok:
-            st.info(f"ℹ️ Sensor 3min não tem `{variavel}` ({versao}) disponível para este período/arquivo.")
+            st.info(f"ℹ️ Sensor 3min não tem `{variavel}` ({versao}) disponível para este período/arquivo.{dica_limpeza}")
         if not s2_ok:
             st.info(f"ℹ️ Sensor 5min não tem `{variavel}` ({versao}) disponível para este período/arquivo "
-                    f"(ex.: PM10 corrigido não existe na fonte de dados desse sensor).")
+                    f"(ex.: PM10 corrigido não existe na fonte de dados desse sensor).{dica_limpeza}")
 
         st.markdown(f"#### Série temporal — {VAR_ICONS[variavel]} {variavel} ({versao if variavel in ('PM2.5','PM10') else 'bruto'})")
         render_comparison_chart(d, ref_col, s1_col, s2_col, variavel, unidade, key_prefix="cmp", height=400)
@@ -629,6 +727,8 @@ with tab_multi:
         }
 
         d, sel_dates = period_selector(df_merged, "mr", help_text="define os dados usados no ajuste do modelo")
+        excluir_out_mr = outlier_toggle("mr")
+        d = apply_outlier_mask(d, [target_col] + list(predictor_map_all.values()), excluir_out_mr)
 
         predictor_map = {label: col for label, col in predictor_map_all.items()
                           if col in d.columns and d[col].notna().any()}
