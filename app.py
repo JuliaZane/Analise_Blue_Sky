@@ -61,6 +61,28 @@ def load_csv(file):
     return df
 
 
+def normalize_pref_columns(df):
+    """A Referência pode chegar em duas convenções de nome:
+    - já renomeada (ref_pm25, ref_pm10, outlier_ref_pm25...) — formato "Prefeitura.csv" tradicional;
+    - saída direta e crua do Sensor_Referencia.py (pm01_particulas_2.5um, outlier_pm01...).
+    Esta função aceita qualquer uma das duas e sempre normaliza para o primeiro formato,
+    para que o resto do app funcione igual não importa qual arquivo for enviado."""
+    if df is None:
+        return df
+    rename_map = {
+        "pm01_particulas_2.5um": "ref_pm25",
+        "pm02_particulas_10um": "ref_pm10",
+        "pm01_particulas_2.5um_sem_limpeza": "ref_pm25_sem_limpeza",
+        "pm02_particulas_10um_sem_limpeza": "ref_pm10_sem_limpeza",
+        "outlier_pm01": "outlier_ref_pm25",
+        "valor_outlier_pm01": "valor_outlier_ref_pm25",
+        "outlier_pm02": "outlier_ref_pm10",
+        "valor_outlier_pm02": "valor_outlier_ref_pm10",
+    }
+    to_rename = {k: v for k, v in rename_map.items() if k in df.columns and v not in df.columns}
+    return df.rename(columns=to_rename) if to_rename else df
+
+
 @st.cache_data(show_spinner=False)
 def build_merged(df_pref, df_3min, df_5min):
     """Une, hora a hora, referência + sensor 3min + sensor 5min num único dataframe.
@@ -363,7 +385,7 @@ with st.sidebar.expander("ℹ️ Quais arquivos usar em cada campo?"):
         "não é preciso enviar um arquivo já alinhado."
     )
 
-df_pref = load_csv(up_pref)
+df_pref = normalize_pref_columns(load_csv(up_pref))
 df_3min = load_csv(up_3min)
 df_5min = load_csv(up_5min)
 df_stat = load_csv(up_stat)
