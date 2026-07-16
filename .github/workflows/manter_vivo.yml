@@ -2,20 +2,27 @@ name: Manter App do Streamlit Vivo
 
 on:
   schedule:
-    # Executa a cada 10 horas
-    - cron: '0 */10 * * *'
-  workflow_dispatch: # Permite que você ative manualmente pelo GitHub se quiser testar
+    # A cada 6 horas — bem dentro do limite de 12h de inatividade do Streamlit Cloud
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Permite rodar manualmente pelo GitHub para testar
 
 jobs:
-  refresh:
+  keepalive:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-    - name: Checkout do código
-      uses: actions/checkout@v4
+      - name: Checkout do código
+        uses: actions/checkout@v4
 
-    - name: Fazer commit vazio
-      run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-        git config --local user.name "github-actions[bot]"
-        git commit --allow-empty -m "Trigger automatico para manter o Streamlit acordado"
-        git push
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar Playwright e o Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Visitar o app para mantê-lo (ou acordá-lo)
+        run: python manter_vivo.py
